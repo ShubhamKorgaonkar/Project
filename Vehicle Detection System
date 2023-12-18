@@ -1,0 +1,354 @@
+//Accident Detection//
+
+#include <pic.h>
+#include<htc.h>
+__CONFIG(0X3F32);
+
+
+#define rs  RB2
+#define en  RB3
+#define db4 RB4
+#define db5 RB5
+#define db6 RB6
+#define db7 RB7
+
+#define vib RC5
+
+
+unsigned int adc_value;
+
+
+void delay_ms(unsigned int i);
+void lcd_cmd(unsigned char ch);
+void lcd_halfcmd(unsigned char ch);
+void lcd_data(unsigned char ch);
+void lcd_string(unsigned char ch,unsigned char *ptr,unsigned char sc);
+void start_lcd(void);
+void lcd_str(unsigned char *r);
+
+void start_adc();
+//unsigned int read_adc(unsigned char channel);
+unsigned int read_adc(unsigned char ch_no);
+
+void send_sms1(unsigned char *sm1);
+void send_sms2(unsigned char *sm2);
+
+void printString(unsigned char *ptr);
+void tx(unsigned char);
+unsigned char rx();
+void start_uart();
+
+unsigned char rec_byte;
+volatile unsigned int x_value,y_value,z_value;
+void display_adxl(void);
+
+void get_gpgga();
+void display_gps();
+void read_gps(void);
+
+unsigned char rx_data,i,rx_value,sms_cnt;
+unsigned char time[10];
+unsigned char lng[14];
+unsigned char lat[14];
+
+
+
+void main(void)
+{
+	TRISB = 0x00;
+	ADCON1 = 0x00;
+	TRISA = 0xff;
+	TRISC = 0xf8;
+
+	start_uart();
+	start_lcd();
+
+	lcd_cmd(0x01);
+	lcd_cmd(0x80);
+	lcd_str("    Accident    ");
+	lcd_cmd(0xc0);
+	lcd_str("   Detection    ");
+	delay_ms(2000);
+
+	start_adc();
+	x_value =0;
+	y_value = 0;
+	z_value = 0;
+	sms_cnt = 0;
+	lcd_cmd(0x01);
+
+	while(1)
+	{
+		delay_ms(1000);
+		display_adxl();
+		
+		
+		if(vib==0 || x_value>350 || y_value<200 ||z_value<200)
+		{
+			//delay_ms(3000);
+			lcd_cmd(0x01);
+			lcd_str("Accident Occured");
+			read_gps();
+			delay_ms(1000);
+
+			if(sms_cnt<4)
+			{
+				sms_cnt++;
+				send_sms1("Accident occured at");
+				delay_ms(20000);
+				send_sms2("Accident occured at");
+				delay_ms(1000);
+			}
+			
+			//read_gps();
+		}
+	}//end of while...
+
+}//end of main...
+
+//-----------------------------------------------------------
+void display_adxl(void)
+{
+		lcd_cmd(0x01);
+		lcd_str("X = ");
+
+			x_value =255;
+		x_value = read_adc(3);
+		lcd_data((x_value/ 100)+ 0x30);
+		lcd_data(((x_value%100)/10 )+ 0x30);
+		lcd_data(((x_value%100)%10 )+ 0x30);
+		delay_ms(100);
+	
+		lcd_cmd(0x88);
+		lcd_str("Y = ");
+
+			y_value =255;
+		y_value = read_adc(1);
+		lcd_data((y_value/ 100)+ 0x30);
+		lcd_data(((y_value%100)/10 )+ 0x30);
+		lcd_data(((y_value%100)%10 )+ 0x30);
+
+		lcd_cmd(0xC0);
+		lcd_str("Z = ");
+
+			z_value =255;
+		z_value = read_adc(2);
+		lcd_data((z_value/ 100)+ 0x30);
+		lcd_data(((z_value%100)/10 )+ 0x30);
+		lcd_data(((z_value%100)%10 )+ 0x30);
+
+		lcd_cmd(0xc8);
+		lcd_str("V = ");
+		if(vib == 1)
+		{
+			lcd_data('0');
+		}
+		else
+			lcd_data('1');
+		
+}
+
+//------------------------------------------------------------
+void send_sms1(unsigned char *sm1)
+{
+	
+	delay_ms(1000);
+	printString("AT\r\n");
+	delay_ms(1000);
+	printString("AT+CMGF = 1\r\n");
+	delay_ms(1000);
+	printString(sm1);
+	printString("\n\rLongitude = ");
+	printString(&lng[0]);
+	printString("\n\rLatitude = ");
+	printString(&lat[0]);
+
+	printString("\x1a\r\n");
+	delay_ms(1000);
+
+}//end of send_sms1...
+//------------------------------------------------------------
+
+void send_sms2(unsigned char *sm2)
+{
+	
+	delay_ms(1000);
+	printString("AT\r\n");
+	delay_ms(1000);
+	printString("AT+CMGF = 1\r\n");
+	delay_ms(1000);
+	printString(sm2);
+	printString("\n\rLongitude = ");
+	printString(&lng[0]);
+	printString("\n\rLatitude = ");
+	printString(&lat[0]);
+
+	printString("\x1a\r\n");
+	delay_ms(1000);
+
+
+}//end of send_sms2...
+
+//------------------------------------------------------------
+
+void start_adc()
+{
+	ADCON0=0X01;
+	ADCON1=0XC0;
+	delay_ms(1);
+	
+}//end of start_adc....
+
+
+//-------------------------------------------------------------
+unsigned int read_adc(unsigned char ch_no)
+{
+volatile unsigned int adc_data;
+volatile unsigned char ch = 0;	
+
+	
+
+	ADCON0 &= 0xc5;				//channel clear	
+	ADCON0 |= (ch_no << 3);		//channel Selection...
+	ADON    = 1;				//ADC ON...
+	//delay_ms(1);				//wait
+	ch++;						//wait
+	ch++;						//wait
+	ADCON0 |= 0x04;				//start conversion...
+	
+	adc_data = (ADRESH << 8)|ADRESL;
+	ADON   = 0;
+	return adc_data;
+
+}//end of read_adc...//working
+
+//-------------------------------------------------------------
+
+void start_lcd(void)
+{
+	delay_ms(15);
+	lcd_halfcmd(0x30);
+	lcd_halfcmd(0x30);
+	lcd_halfcmd(0x30);
+	lcd_halfcmd(0x20);
+
+	lcd_cmd(0x28);
+	lcd_cmd(0x0c);
+	lcd_cmd(0x06);
+	lcd_cmd(0x01);
+
+}//end of start_lcd....
+
+//---------------------------------------------------------------------
+
+
+//------------------------------------------------------------------
+
+void start_uart(void)
+{
+	TXSTA = 0x24;
+	RCSTA = 0x90;
+	SPBRG = 71;
+}//end of start_uart...
+
+//----------------------------------------------------------------
+
+void tx(unsigned char ch)
+{
+	TXREG = ch;
+	while(TRMT == 0);
+	TRMT = 0;
+
+}//end of tx...
+
+//-----------------------------------------------------------------
+
+unsigned char rx(void)
+{
+	while(RCIF == 0)
+	{
+		//lcd_data('1');
+	}
+	RCIF = 0;
+	return (RCREG);
+
+
+}//end of unsigned char...
+
+//------------------------------------------------------------------
+
+
+void read_gps(void)
+{
+	
+	get_gpgga();
+	
+		i = 0;
+		rx_data = 0xff;
+		do
+		{
+			rx_data = rx();
+			if(rx_data != ',')
+			{
+				lng[i] = rx_data;
+				i++;
+			}
+			
+		}while(rx_data != ',');
+		lng[i] = '\0';
+		rx_data = 0xff;
+		do
+		{
+			rx_data = rx();
+			
+		}while(rx_data != ',');
+		
+		i = 0;
+		rx_data = 0xff;
+		do
+		{
+			rx_data = rx();
+			if(rx_data != ',')
+			{
+				lat[i] = rx_data;
+				i++;
+			}
+		}while(rx_data != ',');
+		lat[i] = '\0';
+				
+		display_gps();
+
+}//end of read_gps....
+
+//----------------------------------------------------------------------
+	
+}//end of get_gpgga...
+
+//----------------------------------------------------------------------
+void display_gps()
+{
+	lcd_cmd(0x01);
+	lcd_str("Long=");
+	
+	lcd_str(&lng[0]);
+	
+	lcd_cmd(0xc0);
+	lcd_str("Lat=");
+	lcd_str(&lat[0]);
+	
+	delay_ms(2000);
+	
+}//end of display_gps...
+
+//-----------------------------------------------------------------------
+void delay_ms(unsigned int i)
+{
+	unsigned int j,k;
+	for(j = 0; j < i; j++)
+		for(k = 0;k < 40; k++);
+
+}//end of delay_ms...
+
+//----------------------------------------------------------------
+
+
